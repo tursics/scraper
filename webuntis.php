@@ -4,6 +4,12 @@
 //	$cookie = './temp/tempWebuntisCookie';
 	$userAgent = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 12_3_1) AppleWebKit (KHTML, like Gecko) Chrome Safari (compatible; Tursics-Bot; +https://www.tursics.de)';
 	$timeout = 5;
+	$filterCity = 'Berlin';
+	$SCHOOLQUERY_BACKEND_URL = '';
+	$SCHOOLQUERY_REQUEST_PREFIX = '';
+	$SCHOOLQUERY_DEBOUNCE_THRESHOLD_MS = '';
+	$MAX_SCHOOLS = 0;
+	$UNTIS_URL = '';
 
 	function fetch($uri, $referer = null, $post = null) {
 		global $cookie;
@@ -24,7 +30,7 @@
 
 		if ($post != null) {
 			curl_setopt($ch, CURLOPT_POST, true);
-			curl_setopt($ch, CURLOPT_POSTFIELDS, $post);
+			curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($post));
 		}
 
 		if ($referer != null) {
@@ -39,9 +45,27 @@
 		return $result;
     }
 
-	function getTimeTable($school) {
-		global $uriBase;
-		$uri = $uriBase . '?school=' . $school . '#/basic/timetable';
+	function getEnvironment() {
+		global $SCHOOLQUERY_BACKEND_URL;
+		global $SCHOOLQUERY_REQUEST_PREFIX;
+		global $SCHOOLQUERY_DEBOUNCE_THRESHOLD_MS;
+		global $MAX_SCHOOLS;
+		global $UNTIS_URL;
+
+		$uri = 'https://webuntis.com/environment.json';
+
+		$html = fetch($uri);
+		$json = json_decode($html);
+
+		$SCHOOLQUERY_BACKEND_URL = $json->SCHOOLQUERY_BACKEND_URL;
+		$SCHOOLQUERY_REQUEST_PREFIX = $json->SCHOOLQUERY_REQUEST_PREFIX;
+		$SCHOOLQUERY_DEBOUNCE_THRESHOLD_MS = intval($json->SCHOOLQUERY_DEBOUNCE_THRESHOLD_MS);
+		$MAX_SCHOOLS = intval($json->MAX_SCHOOLS);
+		$UNTIS_URL = $json->UNTIS_URL;
+	}
+
+	function getTimeTable($serverUrl) {
+		$uri = $serverUrl . '#/basic/timetable';
 
 		$html = fetch($uri, $referer);
 
@@ -65,19 +89,92 @@
 		$html = fetch($uri, $referer);
 		$json = json_decode($html);
 
-		// IDC_KLASSE
-		var_dump($json->data->elementTypeLabel);
-		echo('<br><br>');
-
+		$line = '';
 		foreach($json->data->elements as $element) {
-			echo($element->displayname . ' (' . $element->longName . '), Klassenlehrer*in ' . $element->classteacher->longName . ', Kapazität von ' . $element->capacity);
-			echo('<br>');
+//			$line .= $element->displayname . ' (' . $element->longName . '), Klassenlehrer*in ' . $element->classteacher->longName . ', Kapazität von ' . $element->capacity;
+//			$line .= $element->displayname . ' ' . $element->classteacher->longName . ' ';
+			$line .= $element->displayname . ',';
 		}
+
+		return $line;
 	}
 
-	$uri = getTimeTable('max-planck-gymnasium-berlin');
-	sleep(1);
-	getPageConfig($uri, 390, '2022-04-25');
+	function getSchoolQuery($search) {
+		global $SCHOOLQUERY_BACKEND_URL;
+		global $SCHOOLQUERY_REQUEST_PREFIX;
+		global $filterCity;
+
+		$now = time() . '000';
+		$uri = $SCHOOLQUERY_BACKEND_URL;
+		$post = (object) [
+			'id' => $SCHOOLQUERY_REQUEST_PREFIX . $now,
+			'jsonrpc' => '2.0',
+			'method' => 'searchSchool',
+			'params' => [
+				(object) [
+					'search' => $search,
+    			]
+			],
+		];
+		$html = fetch($uri, $referer, $post);
+		$json = json_decode($html);
+
+		if ($json->id == 'error') {
+			echo '<p style="color:red">Error: ' . $json->error->message . '</p>';
+			return null;
+		}
+
+		$result = array();
+		foreach($json->result->schools as $school) {
+			if (stripos($school->address, $filterCity) !== false) {
+				$result[] = $school;
+			}
+		}
+
+		if (count($result) > 1) {
+			foreach($result as $school) {
+				echo $school->displayName . ': ' . $school->address . '<br>';
+			}
+			return null;
+		}
+
+		return $result[0];
+	}
+
+	getEnvironment();
+	$school = getSchoolQuery('planck max');
+
+	if ($school != null) {
+		echo 'displayName: ' . $school->displayName . '<br>';
+		echo 'address: ' . $school->address . '<br>';
+		echo '<br>';
+
+		$uri = getTimeTable($school->serverUrl);
+		sleep(1);
+
+		$time = strtotime(date('Y-m-01'));
+		$lastLine = '';
+		$emptyLine = 0;
+
+		while ($emptyLine < 3) {
+			$date = date('Y-m-d', $time);
+			$line = getPageConfig($uri, $school->schoolId, $date);
+
+			if ($lastLine != $line) {
+				$emptyLine = 0;
+				$lastLine = $line;
+
+				if ($line != '') {
+					echo $date . ' ' . $line . '<br>';
+				}
+			}
+			if ($line == '') {
+				++$emptyLine;
+			}
+
+			$time = strtotime('-1 month', $time);
+		}
+	}
 
 	unlink($cookie);
 ?>
