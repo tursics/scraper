@@ -4,6 +4,7 @@
 //	$cookie = './temp/tempWebuntisCookie';
 	$userAgent = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 12_3_1) AppleWebKit (KHTML, like Gecko) Chrome Safari (compatible; Tursics-Bot; +https://www.tursics.de)';
 	$timeout = 5;
+	$filterSchool = 'planck max';
 	$filterCity = 'Berlin';
 	$SCHOOLQUERY_BACKEND_URL = '';
 	$SCHOOLQUERY_REQUEST_PREFIX = '';
@@ -99,6 +100,39 @@
 		return $line;
 	}
 
+	function getLastPageConfig($referer, $schoolId) {
+		$time = strtotime(date('Y-m-01'));
+		$date = date('Y-m-d', $time);
+		$line = getPageConfig($referer, $schoolId, $date);
+
+		echo $date . ' ' . $line . '<br>';
+	}
+
+	function getAllPageConfigs($referer, $schoolId) {
+		$time = strtotime(date('Y-m-01'));
+		$lastLine = '';
+		$emptyLine = 0;
+
+		while ($emptyLine < 3) {
+			$date = date('Y-m-d', $time);
+			$line = getPageConfig($referer, $schoolId, $date);
+
+			if ($lastLine != $line) {
+				$emptyLine = 0;
+				$lastLine = $line;
+
+				if ($line != '') {
+					echo $date . ' ' . $line . '<br>';
+				}
+			}
+			if ($line == '') {
+				++$emptyLine;
+			}
+
+			$time = strtotime('-1 month', $time);
+		}
+	}
+
 	function getSchoolQuery($search) {
 		global $SCHOOLQUERY_BACKEND_URL;
 		global $SCHOOLQUERY_REQUEST_PREFIX;
@@ -124,6 +158,10 @@
 			return null;
 		}
 
+		if ($json->result == null) {
+			return null;
+		}
+
 		$result = array();
 		foreach($json->result->schools as $school) {
 			if (stripos($school->address, $filterCity) !== false) {
@@ -141,8 +179,35 @@
 		return $result[0];
 	}
 
+	function handleFormInput() {
+		global $filterSchool;
+
+		$school = $_GET['school'];
+		$school = htmlspecialchars($school);
+
+		$filterSchool = $school;
+	}
+
+	function showForm() {
+		global $filterSchool;
+
+		echo '
+			<form action="" method="get">
+				<div>
+					Search school:
+					<input type="search" name="school" autofocus value="' . $filterSchool . '">
+				</div>
+				<div>
+					<input type="submit" value="Search">
+				</div>
+			</form>
+		';
+	}
+
+	handleFormInput();
+	showForm();
 	getEnvironment();
-	$school = getSchoolQuery('planck max');
+	$school = getSchoolQuery($filterSchool);
 
 	if ($school != null) {
 		echo 'displayName: ' . $school->displayName . '<br>';
@@ -152,28 +217,8 @@
 		$uri = getTimeTable($school->serverUrl);
 		sleep(1);
 
-		$time = strtotime(date('Y-m-01'));
-		$lastLine = '';
-		$emptyLine = 0;
-
-		while ($emptyLine < 3) {
-			$date = date('Y-m-d', $time);
-			$line = getPageConfig($uri, $school->schoolId, $date);
-
-			if ($lastLine != $line) {
-				$emptyLine = 0;
-				$lastLine = $line;
-
-				if ($line != '') {
-					echo $date . ' ' . $line . '<br>';
-				}
-			}
-			if ($line == '') {
-				++$emptyLine;
-			}
-
-			$time = strtotime('-1 month', $time);
-		}
+//		getAllPageConfigs($uri, $school->schoolId);
+		getLastPageConfig($uri, $school->schoolId);
 	}
 
 	unlink($cookie);
